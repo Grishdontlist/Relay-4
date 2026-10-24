@@ -1,569 +1,200 @@
-import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
-import { Crosshair, Expand, MapPin, Minus, Plus, X } from "lucide-react";
-import {
-  latLngBounds,
-  type Map as LeafletMap,
-  type Marker as LeafletMarker,
-} from "leaflet";
-import {
-  MapContainer,
-  Marker,
-  Popup,
-  TileLayer,
-  useMap,
-  useMapEvents,
-} from "react-leaflet";
-import { normalizeCoordinates } from "../coordinates";
-import {
-  LOUISIANA_BOUNDS,
-  LOUISIANA_CENTER,
-  TILE_PROVIDER,
-  MAP_STYLES,
-} from "../mapConfig";
-import type { Incident, ContextLayer } from "../types";
-import { categoryLabel, tagLabels } from "../gis";
-import { incidentMarkerIcon } from "../mapIcons";
-import ContextOverlays from "./ContextOverlays";
-import MapViewportController from "./MapViewportController";
-import type { MapCamera, MapStyle, ViewportRequest } from "../responsePresets";
-import "leaflet/dist/leaflet.css";
-import "./IncidentMap.css";
+import L from "leaflet";
+import { useEffect, useState } from "react";
+import { MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
+import { humanize } from "../format";
+import { PRIORITY_LABEL, type Call } from "../intake";
+import { LOUISIANA_BOUNDS, OUTLINE_LATLNGS, OUTSIDE_MASK, PARISH_SHAPES } from "../louisiana";
+import type { Assignment } from "../hooks";
+import { UNIT_TYPE_LABEL, UNITS, type DispatchPlan, type Unit } from "../responders";
+import type { LatLng } from "../types";
+
+const PAN_LIMIT = L.latLngBounds(LOUISIANA_BOUNDS).pad(0.15);
+// The boundaries are simplified; past city level they drift off the streets, so hide them.
+const BOUNDARY_MAX_ZOOM = 11;
 
 type Props = {
-  incidents: Incident[];
-  selectedIncidentId: string;
-  onSelectIncident?: (id: string) => void;
-  visibleIncidentIds?: string[];
-  contextLayers?: ContextLayer[];
-  overview?: boolean;
-  mapStyle?: MapStyle;
-  manualViewport?: boolean;
-  viewportRequest?: ViewportRequest;
-  initialCamera?: MapCamera;
-  onViewportChange?: (camera: MapCamera) => void;
-  onRecenter?: () => void;
+  calls: Call[];
+  selected: Call | undefined;
+  focus: number;
+  plan: DispatchPlan | null;
+  assignments: Record<string, Assignment>;
+  onSelect: (id: string) => void;
 };
-function positionLabel(incident: Incident) {
-  const coordinates = normalizeCoordinates(incident.coordinates);
-  if (!coordinates) return "Exact location unknown";
-  return coordinates.source === "simulated"
-    ? "Simulated coordinates · not a verified real location"
-    : "Reported coordinates · not live GPS";
-}
 
-export default function IncidentMap({
-  incidents,
-  selectedIncidentId,
-  onSelectIncident,
-  visibleIncidentIds,
-  contextLayers,
-  overview,
-  mapStyle = "streets",
-  manualViewport = false,
-  viewportRequest,
-  initialCamera,
-  onViewportChange,
-  onRecenter,
-}: Props) {
-  const camera = useRef<MapCamera | undefined>(initialCamera);
-  const appliedRequest = useRef<number | undefined>(undefined);
-  const selected = incidents.find((i) => i.id === selectedIncidentId);
-  const [expanded, setExpanded] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const expandButton = useRef<HTMLButtonElement>(null);
-  const titleId = useId();
+// The pin is centred on the geocoded point. Live calls, and critical calls whose
+// report has not been sent yet, keep pinging in their priority colour.
+const icon = (call: Call, selected: boolean, sent: boolean) => {
+  const ping = selected || call.live || (call.priority === 1 && !sent);
+  return L.divIcon({
+    className: "",
+    html: `<span class="pin p${call.priority}${ping ? " ping" : ""}${sent ? " sent" : ""}${selected ? " selected" : ""}"></span>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+};
+
+const UNIT_LETTER: Record<Unit["type"], string> = { fire: "F", ems: "M", police: "P", water_rescue: "W" };
+const unitIcon = (unit: Unit, state: "free" | "busy" | "chosen") =>
+  L.divIcon({ className: "", html: `<span class="unit ${state}">${UNIT_LETTER[unit.type]}</span>`, iconSize: [18, 18], iconAnchor: [9, 9] });
+
+/** Keep the view on Louisiana: can't zoom out past the whole state. */
+function LockToLouisiana() {
+  const map = useMap();
   useEffect(() => {
-    if (!expanded) return;
-    dialog.current?.showModal();
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const fit = () => map.setMinZoom(map.getBoundsZoom(LOUISIANA_BOUNDS, false, L.point(24, 24)));
+    fit();
+    map.on("resize", fit);
     return () => {
-      document.body.style.overflow = previous;
+      map.off("resize", fit);
     };
-  }, [expanded]);
-  if (!selected) return null;
-  function closeExpanded() {
-    dialog.current?.close();
-    setExpanded(false);
-    requestAnimationFrame(() => expandButton.current?.focus());
-  }
-  const contents = (large: boolean) => (
-    <MapContents
-      incidents={incidents}
-      selected={selected}
-      onSelectIncident={onSelectIncident}
-      expanded={large}
-      visibleIncidentIds={visibleIncidentIds}
-      contextLayers={contextLayers}
-      overview={overview}
-      mapStyle={mapStyle}
-      manualViewport={manualViewport}
-      viewportRequest={viewportRequest}
-      initialCamera={camera.current}
-      appliedRequest={appliedRequest}
-      onViewportChange={(value) => {
-        camera.current = value;
-        onViewportChange?.(value);
-      }}
-      onRecenter={onRecenter}
-    />
-  );
+  }, [map]);
+  return null;
+}
+
+function StateBoundaries({ callsByParish }: { callsByParish: Map<string, number> }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(() => map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+  if (zoom > BOUNDARY_MAX_ZOOM) return null;
+
   return (
-    <section
-      className="incident-map"
-      aria-label={`Incident map for ${selected.id}`}
-    >
-      <div className="incident-map-heading">
-        <span>
-          <MapPin size={14} aria-hidden="true" />
-          Incident location
-        </span>
-        <button
-          type="button"
-          ref={expandButton}
-          className="map-expand"
-          onClick={() => setExpanded(true)}
-          aria-label="Expand incident map"
-        >
-          <Expand size={14} aria-hidden="true" />
-          Expand
-        </button>
-      </div>
-      {!expanded ? (
-        contents(false)
-      ) : (
-        <div className="map-placeholder">Map open in expanded view</div>
-      )}
-      {expanded && (
-        <dialog
-          ref={dialog}
-          className="map-dialog"
-          aria-labelledby={titleId}
-          onCancel={(event) => {
-            event.preventDefault();
-            closeExpanded();
-          }}
-          onClose={() => setExpanded(false)}
-        >
-          <div className="map-dialog-heading">
-            <div>
-              <p className="eyebrow">INCIDENT LOCATION</p>
-              <h2 id={titleId}>Map · {selected.id}</h2>
-            </div>
-            <button
-              type="button"
-              className="map-action"
-              onClick={closeExpanded}
-              aria-label="Close expanded map"
-              autoFocus
-            >
-              <X size={18} aria-hidden="true" />
-              Close
-            </button>
-          </div>
-          {onSelectIncident && (
-            <label className="map-incident-select">
-              Incident
-              <select
-                aria-label="Map incident"
-                value={selected.id}
-                onChange={(e) => onSelectIncident(e.target.value)}
-              >
-                {incidents
-                  .filter(
-                    (i) =>
-                      !visibleIncidentIds || visibleIncidentIds.includes(i.id),
-                  )
-                  .map((i) => (
-                    <option value={i.id} key={i.id}>
-                      {i.id} · {i.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          )}
-          {contents(true)}
-        </dialog>
-      )}
-    </section>
+    <>
+      <Polygon positions={OUTSIDE_MASK} interactive={false} pathOptions={{ stroke: false, fillColor: "#06070a", fillOpacity: 0.72 }} />
+      {PARISH_SHAPES.map((parish) => {
+        const count = callsByParish.get(parish.name) ?? 0;
+        return (
+          <Polygon
+            key={parish.name}
+            positions={parish.latlngs}
+            pathOptions={{ color: "#ffffff", opacity: 0.14, weight: 1, fillColor: "#f4b01f", fillOpacity: count ? 0.1 : 0 }}
+          >
+            <Tooltip sticky className="parish-tip">
+              {parish.name}
+              {count > 0 && ` · ${count} call${count > 1 ? "s" : ""}`}
+            </Tooltip>
+          </Polygon>
+        );
+      })}
+      <Polygon positions={OUTLINE_LATLNGS} interactive={false} pathOptions={{ color: "#f4b01f", opacity: 0.55, weight: 1.5, fill: false }} />
+    </>
   );
 }
 
-function MapContents({
-  incidents,
-  selected,
-  onSelectIncident,
-  expanded,
-  visibleIncidentIds,
-  contextLayers = [],
-  overview = false,
-  mapStyle,
-  manualViewport,
-  viewportRequest,
-  initialCamera,
-  onViewportChange,
-  onRecenter,
-  appliedRequest,
-}: {
-  incidents: Incident[];
-  selected: Incident;
-  onSelectIncident?: Props["onSelectIncident"];
-  expanded: boolean;
-  visibleIncidentIds?: string[];
-  contextLayers?: ContextLayer[];
-  overview?: boolean;
-  mapStyle: MapStyle;
-  manualViewport: boolean;
-  viewportRequest?: ViewportRequest;
-  initialCamera?: MapCamera;
-  onViewportChange: (camera: MapCamera) => void;
-  onRecenter?: () => void;
-  appliedRequest: MutableRefObject<number | undefined>;
-}) {
-  const provider = MAP_STYLES[mapStyle].provider;
-  const coordinates = normalizeCoordinates(selected.coordinates);
-  const displayedIncidents = incidents.filter(
-    (i) => !visibleIncidentIds || visibleIncidentIds.includes(i.id),
-  );
-  const located = displayedIncidents.flatMap((i) => {
-    const p = normalizeCoordinates(i.coordinates);
-    return p ? [[p.latitude, p.longitude] as [number, number]] : [];
-  });
-  const scope = overview ? JSON.stringify(located) : "";
-  const [map, setMap] = useState<LeafletMap | null>(null);
-  const [recenter, setRecenter] = useState(0);
-  const [tileState, setTileState] = useState<"loading" | "ready" | "error">(
-    "loading",
-  );
-  const [retry, setRetry] = useState(0);
-  const tileError = useRef(false);
-  const helpId = useId();
-  const [view, setView] = useState({
-    zoom: 6,
-    latitude: LOUISIANA_CENTER[0],
-    longitude: LOUISIANA_CENTER[1],
-  });
+function FlyToSelected({ point, focus }: { point: LatLng | undefined; focus: number }) {
+  const map = useMap();
   useEffect(() => {
-    if (!provider || tileState !== "loading") return;
-    const timeout = window.setTimeout(() => setTileState("error"), 12000);
-    return () => window.clearTimeout(timeout);
-  }, [tileState, provider]);
+    if (point) map.flyTo(point, 17, { duration: 0.8 });
+  }, [map, point, focus]);
+  return null;
+}
+
+export function IncidentMap({ calls, selected, focus, plan, assignments, onSelect }: Props) {
+  const pinned = calls.filter((call): call is Call & { point: LatLng } => Boolean(call.point));
+  const unpinned = calls.filter((call) => call.point === null).length;
+  const callsByParish = new Map<string, number>();
+  for (const call of calls) if (call.parish) callsByParish.set(call.parish, (callsByParish.get(call.parish) ?? 0) + 1);
+  const relatedPoints = (selected?.related ?? [])
+    .map((item) => pinned.find((call) => call.incident.id === item.id)?.point)
+    .filter((point): point is LatLng => Boolean(point));
+  const busy = new Set(Object.values(assignments).map((assignment) => assignment.unitId));
+  const selectedAssignment = selected && assignments[selected.incident.id];
+  const routeUnit = selectedAssignment ? UNITS.find((unit) => unit.id === selectedAssignment.unitId) : plan?.chosen?.unit;
+
   return (
-    <div
-      className={`map-contents ${expanded ? "is-expanded" : ""}`}
-      data-map-zoom={view.zoom}
-      data-map-latitude={view.latitude}
-      data-map-longitude={view.longitude}
-    >
-      <div
-        className={`map-location-note ${coordinates?.source === "simulated" ? "simulated" : ""}`}
-      >
-        <strong>{positionLabel(selected)}</strong>
-        <span>
-          {selected.id} · {selected.location}
-        </span>
-        {coordinates ? (
-          <small>
-            {coordinates.latitude.toFixed(4)},{" "}
-            {coordinates.longitude.toFixed(4)} ·{" "}
-            {coordinates.source === "simulated"
-              ? "Fictional demo point only"
-              : "Provided by incident data"}
-          </small>
-        ) : (
-          <small>Louisiana regional view · no pin for this incident</small>
-        )}
-      </div>
-      <div className="map-controlbar">
-        <span className="map-zoom-controls">
-          <button
-            type="button"
-            className="map-action map-zoom-button"
-            aria-label="Zoom in"
-            disabled={!map || view.zoom >= TILE_PROVIDER.maxZoom}
-            onClick={() => map?.zoomIn()}
+    <div className="map-wrap">
+      <MapContainer bounds={LOUISIANA_BOUNDS} boundsOptions={{ padding: [24, 24] }} maxBounds={PAN_LIMIT} maxBoundsViscosity={1} className="map" zoomControl={false}>
+        <LockToLouisiana />
+        <TileLayer
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · boundaries US Census'
+          maxZoom={19}
+        />
+        <StateBoundaries callsByParish={callsByParish} />
+
+        {selected?.point &&
+          relatedPoints.map((point, index) => (
+            <Polyline key={index} positions={[selected.point as LatLng, point]} pathOptions={{ color: "#f4b01f", weight: 2, dashArray: "4 6" }} />
+          ))}
+
+        {UNITS.map((unit) => (
+          <Marker
+            key={unit.id}
+            position={unit.point}
+            icon={unitIcon(unit, unit === routeUnit ? "chosen" : busy.has(unit.id) ? "busy" : "free")}
+            zIndexOffset={-100}
           >
-            <Plus size={18} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="map-action map-zoom-button"
-            aria-label="Zoom out"
-            disabled={!map || view.zoom <= 3}
-            onClick={() => map?.zoomOut()}
-          >
-            <Minus size={18} aria-hidden="true" />
-          </button>
-        </span>
-        <button
-          className="map-action"
-          type="button"
-          onClick={() => {
-            map?.closePopup();
-            if (onRecenter) onRecenter();
-            else setRecenter((n) => n + 1);
-          }}
-        >
-          <Crosshair size={15} aria-hidden="true" />
-          Recenter
-        </button>
-        <button
-          className="map-action"
-          type="button"
-          disabled={!located.length}
-          onClick={() =>
-            map?.fitBounds(latLngBounds(located), {
-              padding: [32, 32],
-              maxZoom: 12,
-              animate: false,
-            })
-          }
-        >
-          Fit visible incidents
-        </button>
-        <span className="map-zoom-readout" aria-live="polite">
-          Zoom {view.zoom}
-        </span>
-      </div>
-      <MapContainer
-        ref={setMap}
-        className="relay-leaflet-map"
-        center={LOUISIANA_CENTER}
-        zoom={6}
-        minZoom={3}
-        maxZoom={TILE_PROVIDER.maxZoom}
-        zoomControl={false}
-        scrollWheelZoom
-        touchZoom
-        dragging
-        keyboard
-        aria-label={`Interactive map for ${selected.id}`}
-        aria-describedby={helpId}
-      >
-        {manualViewport ? (
-          <MapViewportController
-            initialExtent={located}
-            initialCamera={initialCamera}
-            request={viewportRequest}
-            appliedRequest={appliedRequest}
-            helpId={helpId}
-            onChange={(value) => {
-              setView(value);
-              onViewportChange(value);
-            }}
-          />
-        ) : (
-          <MapViewSync
-            selectedId={selected.id}
-            latitude={coordinates?.latitude}
-            longitude={coordinates?.longitude}
-            recenter={recenter}
-            onViewChange={setView}
-            helpId={helpId}
-            scope={scope}
-          />
-        )}
-        {provider && (
-          <TileLayer
-            key={`${mapStyle}-${retry}`}
-            url={provider.url}
-            attribution={provider.attribution}
-            maxZoom={TILE_PROVIDER.maxZoom}
-            keepBuffer={0}
-            updateWhenIdle
-            eventHandlers={{
-              loading: () => {
-                tileError.current = false;
-                setTileState("loading");
-              },
-              tileerror: () => {
-                tileError.current = true;
-                setTileState("error");
-              },
-              load: () => setTileState(tileError.current ? "error" : "ready"),
-            }}
-          />
-        )}
-        <ContextOverlays layers={contextLayers} />
-        {displayedIncidents.map((incident) => (
-          <IncidentPin
-            key={incident.id}
-            incident={incident}
-            selected={incident.id === selected.id}
-            onSelectIncident={onSelectIncident}
-          />
+            <Tooltip direction="top" offset={[0, -10]}>
+              {unit.name} · {UNIT_TYPE_LABEL[unit.type]} · {busy.has(unit.id) ? "assigned" : "available"}
+              <br />
+              {unit.base} (synthetic unit)
+            </Tooltip>
+          </Marker>
         ))}
-      </MapContainer>
-      <div className="map-tile-message" aria-live="polite">
-        {!provider ? (
-          <span>
-            {MAP_STYLES[mapStyle].label} unavailable.{" "}
-            {MAP_STYLES[mapStyle].reason} No replacement basemap is displayed.
-          </span>
-        ) : tileState === "error" ? (
-          <>
-            <span>
-              Map tiles unavailable or incomplete. Check your connection.
-              Incident details remain available above.
-            </span>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => {
-                tileError.current = false;
-                setTileState("loading");
-                setRetry((n) => n + 1);
-              }}
-            >
-              Retry map tiles
-            </button>
-          </>
-        ) : tileState === "loading" ? (
-          "Loading OpenStreetMap tiles…"
-        ) : (
-          "OpenStreetMap · browse to explore the area"
+
+        {selected?.point && routeUnit && (
+          <Polyline
+            positions={[routeUnit.point, selected.point]}
+            pathOptions={{ color: selectedAssignment ? "#7bffb2" : "#ffffff", opacity: 0.7, weight: 2, dashArray: selectedAssignment ? undefined : "2 6" }}
+          />
         )}
+
+        {pinned.map((call) => (
+          <Marker
+            // Remount when selected: Leaflet won't switch an existing tooltip to permanent.
+            key={call === selected ? `${call.incident.id}:selected` : call.incident.id}
+            position={call.point}
+            icon={icon(call, call === selected, Boolean(assignments[call.incident.id]))}
+            zIndexOffset={call === selected ? 1000 : (4 - call.priority) * 100}
+            eventHandlers={{ click: () => onSelect(call.incident.id) }}
+          >
+            {call === selected ? (
+              <Tooltip permanent direction="right" offset={[18, 0]} className={`reported-tip p${call.priority}`}>
+                <span className="eyebrow">Reported location</span>
+                <strong>{call.incident.location}</strong>
+                {call.incident.landmark && <span>{call.incident.landmark}</span>}
+                <span className="mono">
+                  {call.point[0].toFixed(5)}, {call.point[1].toFixed(5)}
+                  {call.parish && ` · ${call.parish}`}
+                </span>
+                <span className={call.incident.location_confirmed ? "ok" : "warn"}>
+                  {call.incident.location_confirmed ? "Caller confirmed" : "Not confirmed by caller"}
+                </span>
+              </Tooltip>
+            ) : (
+              <Tooltip direction="top" offset={[0, -12]}>
+                <strong>{humanize(call.incident.incident_type, "Unclassified incident")}</strong> · {PRIORITY_LABEL[call.priority]}
+                <br />
+                {call.incident.location}
+                {call.parish && ` · ${call.parish}`}
+              </Tooltip>
+            )}
+          </Marker>
+        ))}
+        <FlyToSelected point={selected?.point ?? undefined} focus={focus} />
+      </MapContainer>
+
+      {selected && !selected.point && (
+        <div className="map-notice">
+          <b>{selected.incident.location ?? "No location reported yet"}</b>
+          <span>
+            {!selected.incident.location
+              ? "Ask the caller for an address, cross street or landmark."
+              : selected.point === undefined
+                ? "Locating on the map…"
+                : "Could not be found in Louisiana. Ask for a cross street, parish or nearby landmark."}
+          </span>
+        </div>
+      )}
+
+      <div className="map-legend">
+        <span><i className="pin p1" /> P1</span>
+        <span><i className="pin p2" /> P2</span>
+        <span><i className="pin p3" /> P3</span>
+        <span><i className="pin p3 ring" /> Live / P1 unsent</span>
+        <span><i className="unit free">F</i> Unit (synthetic)</span>
+        {unpinned > 0 && <span className="warn">{unpinned} not on map</span>}
+        <span className="muted">Pins geocoded from the caller's stated location · priority is a suggestion</span>
       </div>
-      <p id={helpId} className="map-help">
-        Drag or use arrow keys to pan. Scroll, pinch, or use + / − to zoom.
-        Browsing never changes incident facts. No live GPS tracking.
-      </p>
-      <a
-        className="map-issue-link"
-        href="https://www.openstreetmap.org/fixthemap"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        Report a map issue
-      </a>
     </div>
   );
-}
-
-function IncidentPin({
-  incident,
-  selected,
-  onSelectIncident,
-}: {
-  incident: Incident;
-  selected: boolean;
-  onSelectIncident?: Props["onSelectIncident"];
-}) {
-  const marker = useRef<LeafletMarker>(null);
-  useEffect(() => {
-    if (!selected) marker.current?.closePopup();
-  }, [selected]);
-  useEffect(() => {
-    marker.current
-      ?.getElement()
-      ?.setAttribute(
-        "aria-label",
-        `${incident.id}, ${tagLabels(incident).join(", ")}, ${incident.location}, ${incident.coordinates?.source ?? "unknown"} position`,
-      );
-  }, [incident]);
-  const point = normalizeCoordinates(incident.coordinates);
-  if (!point) return null;
-  const simulated = point.source === "simulated";
-  return (
-    <Marker
-      ref={marker}
-      position={[point.latitude, point.longitude]}
-      icon={incidentMarkerIcon(incident.category, selected, simulated)}
-      title={`${incident.id} · ${incident.location} · ${tagLabels(incident).join(", ")} · ${simulated ? "Simulated coordinates" : "Reported coordinates"}`}
-      alt={`${incident.id} incident marker, ${simulated ? "simulated" : "reported"}`}
-      zIndexOffset={selected ? 1000 : 0}
-      keyboard
-      draggable={false}
-      eventHandlers={{ click: () => onSelectIncident?.(incident.id) }}
-    >
-      <Popup>
-        <div className="incident-map-popup">
-          <strong>{incident.id}</strong>
-          <span>{incident.location}</span>
-          <span>
-            {categoryLabel(incident.category)} · {incident.status}
-          </span>
-          <small>{positionLabel(incident)}</small>
-        </div>
-      </Popup>
-    </Marker>
-  );
-}
-
-function MapViewSync({
-  selectedId,
-  latitude,
-  longitude,
-  recenter,
-  onViewChange,
-  helpId,
-  scope,
-}: {
-  helpId: string;
-  scope: string;
-  selectedId: string;
-  latitude?: number;
-  longitude?: number;
-  recenter: number;
-  onViewChange: (view: {
-    zoom: number;
-    latitude: number;
-    longitude: number;
-  }) => void;
-}) {
-  const map = useMap();
-  const lastScope = useRef<string | null>(null);
-  useMapEvents({ moveend: () => updateView(), zoomend: () => updateView() });
-  function updateView() {
-    const center = map.getCenter();
-    onViewChange({
-      zoom: map.getZoom(),
-      latitude: center.lat,
-      longitude: center.lng,
-    });
-  }
-  useEffect(() => {
-    const container = map.getContainer();
-    container.setAttribute("role", "region");
-    container.setAttribute("aria-label", "Interactive incident map");
-    container.setAttribute("aria-describedby", helpId);
-    let initialized = false;
-    const resize = () => {
-      // Native dialogs start display:none. Wait for a real viewport before
-      // centering; subsequent resizing preserves the user's browsed center.
-      if (!container.clientWidth || !container.clientHeight) return;
-      map.invalidateSize({ animate: false });
-      if (!initialized) {
-        initialized = true;
-        map.stop();
-        if (scope && lastScope.current !== scope) {
-          lastScope.current = scope;
-          const points = JSON.parse(scope) as [number, number][];
-          if (points.length)
-            map.fitBounds(latLngBounds(points), {
-              padding: [32, 32],
-              maxZoom: 12,
-              animate: false,
-            });
-          else
-            map.fitBounds(LOUISIANA_BOUNDS, {
-              padding: [12, 12],
-              animate: false,
-            });
-        } else if (latitude !== undefined && longitude !== undefined)
-          map.setView([latitude, longitude], 11, { animate: false });
-        else
-          map.fitBounds(LOUISIANA_BOUNDS, {
-            padding: [12, 12],
-            animate: false,
-          });
-      }
-      updateView();
-    };
-    const observer = new ResizeObserver(resize);
-    observer.observe(container);
-    resize();
-    return () => observer.disconnect();
-  }, [map, selectedId, latitude, longitude, recenter, helpId, scope]);
-  return null;
 }
