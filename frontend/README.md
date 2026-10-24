@@ -78,6 +78,26 @@ Layers include reported blockages, assigned response units, fire hazards, fire u
 
 Only OpenStreetMap tiles are externally connected. Backend incident data, authenticated multi-unit approvals, authoritative unit positions, hospital data, weather alerts, flood models, closure sources, durable audit and synchronization still require the teammate's backend integration. There is no live GPS, resource-availability inference, severity scoring, or route/safety guidance. See the proposed API handoff for the new fields and cardinality.
 
+## Response presets and map styles
+
+The Map page has independent **Map style**, **Response preset**, and **incident category filter** controls. Presets do not filter incidents: the Accident + Fire hazard collision remains in both relevant category filters, regardless of the chosen response preset.
+
+| Preset | Default context layers | Focus |
+| --- | --- | --- |
+| Overview | None; enable optional context manually | All supplied incident positions |
+| Fire | Building entrances, hydrants, reported fire hazards, fire units | Fire reports (including secondary fire tags) and enabled context |
+| Accident | Reported road blockages, vehicle locations, assigned response units | Accident reports and enabled context |
+| Medical | Medical access points, EMS units, hospital locations | Medical reports and enabled context |
+| Weather | Available weather-alert polygons, waterways, flood-risk zones | Weather/flood reports and enabled context |
+
+The contextual panel explains each preset and its unknown facts. The legend lists currently mapped incident categories and only enabled, ready context layers with valid geometry, using the same colors/shapes as the overlays. Every layer shows its source and source timestamp. Additional entrances, hydrants, vehicle positions, medical access points and waterways are **synthetic training fixtures** loaded through the existing adapter. Hydrant existence/serviceability/flow/pressure, access suitability, hospital capabilities/receiving status, resource availability and actual hazard boundaries remain Unknown. No point is presented as a live position.
+
+Selecting a preset explicitly fits its relevant supplied incident/context positions. Recenter recalculates that preset extent from current data. No coordinates means a Louisiana regional view, never an invented incident pin. Afterward, panning, zooming, category filters, source/data updates and layer changes preserve the camera. Explicit incident selection can pan to a supplied position without changing zoom; Fit visible incidents is a separate explicit map action. Each preset remembers its layer overrides, and Reset preset layers resets only those layers. Preset, category, style, layer choices and camera survive route navigation during the session. Expansion/closing preserves the camera; reloading resets the simulation and view preferences.
+
+Layer cards support Loading, Empty, Location unknown, Unavailable and Error states. Only ready, valid geometry is drawn. Errors offer an explicit adapter retry; source failures never change incident facts or automatically replay preset zoom. `simulationApi.reloadContextLayer` reloads local fixtures today and is the seam for a future agreed backend context service.
+
+Streets reuses the existing OpenStreetMap raster source and visible contributor attribution. **Satellite and Terrain are labeled unavailable** because the frontend has no configured, licensed provider/attribution terms or credentials for them. They are disabled choices, not alternative names for Streets. No imagery provider or key was added. See [MAP-PROVIDERS.md](MAP-PROVIDERS.md) for the provider review and browser validation scope.
+
 ## Structure
 
 The scaffold's separation of reusable UI, screens, service clients, types, and assets is retained. Current implementation files are shown below; the `screens/`, `services/`, `types/`, and `tests/` directories contain incoming placeholders for future organization, not a second data model or active API client.
@@ -103,6 +123,6 @@ frontend/
 ```
 
 
-`src/types.ts`: shared domain types. `src/mockData.ts`: synthetic scenarios. `src/api.ts`: replaceable data adapter. `src/state.ts`: simulation commands. `src/coordinates.ts`: coordinate validation. `src/components/IncidentMap.tsx`: shared map. `src/components/GisMapPage.tsx`: full GIS workspace. `src/components/ContextOverlays.tsx`: context geometry. `src/gis.ts`: taxonomy, assignment summaries, and derived layers. `src/mapConfig.ts`: tile provider and regional defaults. `src/App.tsx`: reusable panels, forms, navigation, and screens. `src/styles.css`: responsive styles. See [API-CONTRACT.md](API-CONTRACT.md) for the proposed backend handoff.
+`src/types.ts`: shared domain types. `src/mockData.ts`: synthetic scenarios. `src/api.ts`: replaceable data adapter. `src/state.ts`: simulation commands. `src/coordinates.ts`: coordinate validation. `src/components/IncidentMap.tsx`: shared map. `src/components/GisMapPage.tsx`: full GIS workspace. `src/components/ContextOverlays.tsx`: context geometry. `src/gis.ts`: taxonomy, assignment summaries, and derived layers. `src/mapConfig.ts`: provider/style availability and regional defaults. `src/responsePresets.ts`: presentation-only preset definitions and extent calculation. `src/responseFixtures.ts`: synthetic operational context. `src/components/MapViewportController.tsx`: explicit GIS camera commands and restoration. `src/App.tsx`: reusable panels, forms, navigation, and screens. `src/styles.css`: responsive styles. See [API-CONTRACT.md](API-CONTRACT.md) for the proposed backend handoff.
 
 The browser may request optional Google Fonts; system sans-serif is the fallback. No secrets are required.

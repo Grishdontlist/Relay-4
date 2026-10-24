@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
 import { Crosshair, Expand, MapPin, Minus, Plus, X } from "lucide-react";
 import {
   latLngBounds,
@@ -18,11 +18,14 @@ import {
   LOUISIANA_BOUNDS,
   LOUISIANA_CENTER,
   TILE_PROVIDER,
+  MAP_STYLES,
 } from "../mapConfig";
 import type { Incident, ContextLayer } from "../types";
 import { categoryLabel, tagLabels } from "../gis";
 import { incidentMarkerIcon } from "../mapIcons";
 import ContextOverlays from "./ContextOverlays";
+import MapViewportController from "./MapViewportController";
+import type { MapCamera, MapStyle, ViewportRequest } from "../responsePresets";
 import "leaflet/dist/leaflet.css";
 import "./IncidentMap.css";
 
@@ -33,6 +36,12 @@ type Props = {
   visibleIncidentIds?: string[];
   contextLayers?: ContextLayer[];
   overview?: boolean;
+  mapStyle?: MapStyle;
+  manualViewport?: boolean;
+  viewportRequest?: ViewportRequest;
+  initialCamera?: MapCamera;
+  onViewportChange?: (camera: MapCamera) => void;
+  onRecenter?: () => void;
 };
 function positionLabel(incident: Incident) {
   const coordinates = normalizeCoordinates(incident.coordinates);
@@ -49,7 +58,15 @@ export default function IncidentMap({
   visibleIncidentIds,
   contextLayers,
   overview,
+  mapStyle = "streets",
+  manualViewport = false,
+  viewportRequest,
+  initialCamera,
+  onViewportChange,
+  onRecenter,
 }: Props) {
+  const camera = useRef<MapCamera | undefined>(initialCamera);
+  const appliedRequest = useRef<number | undefined>(undefined);
   const selected = incidents.find((i) => i.id === selectedIncidentId);
   const [expanded, setExpanded] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -79,6 +96,16 @@ export default function IncidentMap({
       visibleIncidentIds={visibleIncidentIds}
       contextLayers={contextLayers}
       overview={overview}
+      mapStyle={mapStyle}
+      manualViewport={manualViewport}
+      viewportRequest={viewportRequest}
+      initialCamera={camera.current}
+      appliedRequest={appliedRequest}
+      onViewportChange={(value) => {
+        camera.current = value;
+        onViewportChange?.(value);
+      }}
+      onRecenter={onRecenter}
     />
   );
   return (
@@ -170,6 +197,13 @@ function MapContents({
   visibleIncidentIds,
   contextLayers = [],
   overview = false,
+  mapStyle,
+  manualViewport,
+  viewportRequest,
+  initialCamera,
+  onViewportChange,
+  onRecenter,
+  appliedRequest,
 }: {
   incidents: Incident[];
   selected: Incident;
@@ -178,7 +212,15 @@ function MapContents({
   visibleIncidentIds?: string[];
   contextLayers?: ContextLayer[];
   overview?: boolean;
+  mapStyle: MapStyle;
+  manualViewport: boolean;
+  viewportRequest?: ViewportRequest;
+  initialCamera?: MapCamera;
+  onViewportChange: (camera: MapCamera) => void;
+  onRecenter?: () => void;
+  appliedRequest: MutableRefObject<number | undefined>;
 }) {
+  const provider = MAP_STYLES[mapStyle].provider;
   const coordinates = normalizeCoordinates(selected.coordinates);
   const displayedIncidents = incidents.filter(
     (i) => !visibleIncidentIds || visibleIncidentIds.includes(i.id),
@@ -202,10 +244,10 @@ function MapContents({
     longitude: LOUISIANA_CENTER[1],
   });
   useEffect(() => {
-    if (tileState !== "loading") return;
+    if (!provider || tileState !== "loading") return;
     const timeout = window.setTimeout(() => setTileState("error"), 12000);
     return () => window.clearTimeout(timeout);
-  }, [tileState]);
+  }, [tileState, provider]);
   return (
     <div
       className={`map-contents ${expanded ? "is-expanded" : ""}`}
@@ -258,7 +300,8 @@ function MapContents({
           type="button"
           onClick={() => {
             map?.closePopup();
-            setRecenter((n) => n + 1);
+            if (onRecenter) onRecenter();
+            else setRecenter((n) => n + 1);
           }}
         >
           <Crosshair size={15} aria-hidden="true" />
@@ -297,34 +340,50 @@ function MapContents({
         aria-label={`Interactive map for ${selected.id}`}
         aria-describedby={helpId}
       >
-        <MapViewSync
-          selectedId={selected.id}
-          latitude={coordinates?.latitude}
-          longitude={coordinates?.longitude}
-          recenter={recenter}
-          onViewChange={setView}
-          helpId={helpId}
-          scope={scope}
-        />
-        <TileLayer
-          key={retry}
-          url={TILE_PROVIDER.url}
-          attribution={TILE_PROVIDER.attribution}
-          maxZoom={TILE_PROVIDER.maxZoom}
-          keepBuffer={0}
-          updateWhenIdle
-          eventHandlers={{
-            loading: () => {
-              tileError.current = false;
-              setTileState("loading");
-            },
-            tileerror: () => {
-              tileError.current = true;
-              setTileState("error");
-            },
-            load: () => setTileState(tileError.current ? "error" : "ready"),
-          }}
-        />
+        {manualViewport ? (
+          <MapViewportController
+            initialExtent={located}
+            initialCamera={initialCamera}
+            request={viewportRequest}
+            appliedRequest={appliedRequest}
+            helpId={helpId}
+            onChange={(value) => {
+              setView(value);
+              onViewportChange(value);
+            }}
+          />
+        ) : (
+          <MapViewSync
+            selectedId={selected.id}
+            latitude={coordinates?.latitude}
+            longitude={coordinates?.longitude}
+            recenter={recenter}
+            onViewChange={setView}
+            helpId={helpId}
+            scope={scope}
+          />
+        )}
+        {provider && (
+          <TileLayer
+            key={`${mapStyle}-${retry}`}
+            url={provider.url}
+            attribution={provider.attribution}
+            maxZoom={TILE_PROVIDER.maxZoom}
+            keepBuffer={0}
+            updateWhenIdle
+            eventHandlers={{
+              loading: () => {
+                tileError.current = false;
+                setTileState("loading");
+              },
+              tileerror: () => {
+                tileError.current = true;
+                setTileState("error");
+              },
+              load: () => setTileState(tileError.current ? "error" : "ready"),
+            }}
+          />
+        )}
         <ContextOverlays layers={contextLayers} />
         {displayedIncidents.map((incident) => (
           <IncidentPin
@@ -336,7 +395,12 @@ function MapContents({
         ))}
       </MapContainer>
       <div className="map-tile-message" aria-live="polite">
-        {tileState === "error" ? (
+        {!provider ? (
+          <span>
+            {MAP_STYLES[mapStyle].label} unavailable.{" "}
+            {MAP_STYLES[mapStyle].reason} No replacement basemap is displayed.
+          </span>
+        ) : tileState === "error" ? (
           <>
             <span>
               Map tiles unavailable or incomplete. Check your connection.

@@ -77,7 +77,7 @@ type ContextFeature = {
 };
 type ContextLayer = {
   id: string; name: string;
-  state: 'synthetic' | 'connected' | 'unavailable';
+  state: 'synthetic' | 'connected' | 'unavailable' | 'loading' | 'error';
   source: string;
   updatedAt: string | null;
   message?: string;
@@ -97,7 +97,7 @@ These geometry shapes reuse the existing Coordinates type; they are **not GeoJSO
 
 `src/gis.ts` derives road blockage/fire hazard overlays from incident records and assigned response/fire/EMS overlays from the same unit and assignment records used elsewhere. It never copies incident positions onto responders. Other layers (hospital locations, weather alerts, flood-risk zones, closures) arrive through `contextLayers`. The demo hospital is fictional; capabilities, receiving status, capacity, and resource availability are Unknown. Weather/flood polygons are illustrative training geometry, not official warnings or risk assessments. There are no verified hydrants or safe routes.
 
-Unavailable layers have explanatory messages, no renderable overlay, and disabled toggles. Empty layers show “No records supplied”; records without positions remain readable in Layers without a map feature. Incident filters and layer toggles are independent. Fit visible incidents excludes unknown positions and context geometry. OpenStreetMap attribution remains visible, with standard browser Referer/caching behavior and no bulk download or tile prefetch. Automated gesture tests use local synthetic tiles.
+Unavailable/loading/error layers have explanatory states and no renderable overlay. Errors expose an explicit retry through the adapter, with Loading while awaiting its result; errors preserve other layers, the camera and incident facts. Empty layers show “No records supplied”; records without positions remain readable in Layers without a map feature. Incident filters and layer toggles are independent. Fit visible incidents excludes unknown positions and context geometry. OpenStreetMap attribution remains visible, with standard browser Referer/caching behavior and no bulk download or tile prefetch. Automated gesture tests use local synthetic tiles.
 
 ## Existing calls, audit, and commands
 
@@ -111,3 +111,13 @@ Calls retain `{ id, incidentId: string | null, language, time, transcript: { spe
 | Acknowledge receipt | `assignmentId` | Idempotently acknowledge only that assignment, set receipt timestamp, and audit; travel status stays Unknown. |
 
 Before live integration, agree transport, authorization, concurrency/versioning, structured errors, source attribution, timestamp semantics, and feed licensing. Replace command implementations with validated backend responses and preserve unsaved correction input on failures. No deployment or backend changes are included.
+
+## Response preset and basemap extensions
+
+Presets, category filters, style choices, per-preset layer overrides and camera state are frontend presentation preferences, not Incident fields. No new backend endpoint or server-side preset schema is assumed. `src/responsePresets.ts` defines the Fire/Accident/Medical/Weather layer groups, contextual text and maximum fit zooms. Explicit preset selection or Recenter generates a one-shot viewport request; source refreshes and layer toggles do not generate camera commands. Unknown locations remain null. There is no automatic geocoding, safe-route calculation or tracking.
+
+Additional ContextLayer IDs are `building-entrances`, `hydrants`, `vehicle-locations`, `access-points`, and `waterways`; each reuses the existing ContextFeature geometry, coordinate provenance, source and timestamp fields. `ems-units` is derived from the shared unit roster (all EMS records, with assignment/availability kept separate); `assigned-ems` remains available as the earlier assigned-only layer. All additional operational fixtures are explicitly synthetic. Do not promote their positions or boundaries into operational data on integration.
+
+`simulationApi.reloadContextLayer(id)` currently returns a deep clone of a local fixture or rejects an unknown source. A future service implementation should return a complete ContextLayer (including source/timestamp/provenance) or a rejected operation; the UI transitions loading → ready/error without changing incident records. Use `features: []` for an empty ready layer; `state: 'unavailable'` plus `message` for an unconnected source. Loading/error layers never draw stale features. Source timestamps describe the source records, not the time a preset was selected. Preserve provider licensing and source metadata when connecting real context.
+
+Only Streets has a configured provider. Satellite/Terrain are unavailable in `mapConfig.ts` and have no fallback source. Enabling a future style requires an explicitly reviewed provider URL, license/attribution, browser/CORS/zoom compatibility and appropriate public browser credentials (if required); never expose backend secrets. Existing OpenStreetMap attribution and tile policy remain intact. See [MAP-PROVIDERS.md](MAP-PROVIDERS.md).

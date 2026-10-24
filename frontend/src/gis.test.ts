@@ -69,7 +69,7 @@ describe("GIS incident and assignment model", () => {
   });
   it("handles absent static context and unavailable layers without inventing a feed", () => {
     const data = { ...structuredClone(sampleData), contextLayers: [] };
-    expect(buildMapLayers(data)).toHaveLength(5);
+    expect(buildMapLayers(data)).toHaveLength(6);
     const unavailable = sampleData.contextLayers.find(
       (l) => l.state === "unavailable",
     )!;

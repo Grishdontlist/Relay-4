@@ -63,7 +63,7 @@ export type ContextFeature = {
 export type ContextLayer = {
   id: string;
   name: string;
-  state: "synthetic" | "connected" | "unavailable";
+  state: "synthetic" | "connected" | "unavailable" | "loading" | "error";
   source: string;
   updatedAt: string | null;
   message?: string;

@@ -441,3 +441,142 @@
     width: 100%;
   }
 }
+
+.map-preset-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) 1.4fr;
+  gap: 18px;
+  align-items: center;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #dfe8f1;
+  background: white;
+  border-radius: 7px;
+}
+.map-preset-controls label {
+  margin: 0;
+  font-size: 12px;
+  color: #345777;
+}
+.map-preset-controls select {
+  min-height: 40px;
+  font-size: 12px;
+}
+.map-style-availability {
+  font-size: 10px;
+  color: #7c8fa2;
+  line-height: 1.7;
+}
+.response-context {
+  background: #f0f6e9;
+  border: 1px solid #dfeacd;
+  border-radius: 7px;
+  padding: 17px;
+  margin: 0 0 15px;
+  color: #37536a;
+}
+.response-context h2 {
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+.response-context p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.response-context .eyebrow {
+  font-size: 9px;
+  color: #718253;
+}
+.response-context dl {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+  margin: 13px 0;
+}
+.response-context dt {
+  font-size: 10px;
+  color: #7b8b6c;
+}
+.response-context dd {
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.response-focus {
+  color: #677c62;
+}
+.response-context ul {
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.response-context li {
+  margin-top: 7px;
+}
+.response-context li span {
+  display: block;
+  color: #647b71;
+}
+.response-context > small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #7d8d73;
+  margin-top: 10px;
+}
+.map-independence-note {
+  font-size: 11px;
+  color: #6a8098;
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+.reset-preset-layers {
+  min-height: 36px;
+  margin-bottom: 10px;
+}
+.layer-state-error {
+  border-color: #e7cabf;
+  background: #fffbf8;
+}
+.layer-state-loading {
+  background: #f5f8fc;
+}
+.layer-state-unavailable {
+  background: #f7f9fb;
+}
+.legend-point {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+}
+.legend-line {
+  border-width: 0 0 4px;
+  background: none;
+  height: 4px;
+}
+@media (max-width: 1000px) {
+  .map-preset-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+  .map-style-availability {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 650px) {
+  .map-preset-controls {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .map-preset-controls select {
+    min-height: 44px;
+  }
+  .response-context {
+    padding: 14px;
+  }
+  .response-context dl {
+    gap: 13px;
+  }
+}
+
+.gis-side .response-context {
+  margin: 0;
+}
