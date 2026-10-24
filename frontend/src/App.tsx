@@ -27,7 +27,7 @@ import GisMapPage from "./components/GisMapPage";
 import { initialMapPreferences, type MapCamera } from "./responsePresets";
 import IncidentTags from "./components/IncidentTags";
 import { disciplineLabel, displayTimestamp } from "./gis";
-import louisianaMark from "./assets/louisiana.svg";
+import RelayLogo from "./components/RelayLogo";
 import {
   acknowledgeAssignment,
   approveAssignment,
@@ -296,15 +296,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className={`sidebar ${menu ? "is-open" : ""}`}>
-        <a className="brand" href="#/home" aria-label="Relay4 home">
-          <img
-            className="brand-mark"
-            src={louisianaMark}
-            alt=""
-            aria-hidden="true"
-          />
-          relay<span>4</span>
-        </a>
+        <RelayLogo onHome={() => go("home")} />
         <div className="workspace-label">LOUISIANA COORDINATION</div>
         <nav aria-label="Main navigation">
           {navigation.map(({ id, label, icon: Icon }) => (
@@ -1088,7 +1080,10 @@ export default function App() {
           </div>
         )}
         <footer>
-          <span>Relay4 · Louisiana · Synthetic data</span>
+          <div className="footer-branding">
+            <RelayLogo size="compact" onHome={() => go("home")} />
+            <span>Louisiana · Synthetic data</span>
+          </div>
           <span>
             <ShieldCheck size={15} />
             Human-approved coordination

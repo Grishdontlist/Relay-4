@@ -1,0 +1,70 @@
+.relay-logo {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  flex: 0 0 auto;
+  color: #fff;
+  font-family: "Manrope", sans-serif;
+  font-weight: 800;
+  font-size: 34px;
+  line-height: 1;
+  text-decoration: none;
+  padding: 0 11px;
+  border-radius: 4px;
+}
+.relay-logo--sidebar { align-self: center; }
+.relay-logo .relay-logo__word {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .05em;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  letter-spacing: 0;
+  line-height: 1;
+  color: #fff;
+}
+.relay-logo .relay-logo__louisiana {
+  display: block;
+  flex: 0 0 auto;
+  /* The asset is already cropped to its full path bounds. Keep every island.
+     cap uses the same font's cap height; the fallback supports older browsers. */
+  height: .72em;
+  height: 1cap;
+  width: auto;
+  object-fit: contain;
+  margin: 0;
+}
+.relay-logo .relay-logo__letter {
+  display: block;
+  flex: 0 0 auto;
+}
+/* Small optical corrections for Manrope's side bearings. The shared flex gap
+   stays constant; these remove excess glyph whitespace, never SVG geometry. */
+.relay-logo .relay-logo__letter--r { margin-inline-end: -.02em; }
+.relay-logo .relay-logo__letter--e { margin-inline-start: -.06em; margin-inline-end: -.03em; }
+.relay-logo .relay-logo__four {
+  margin-inline-start: -.02em;
+  color: #c1f249;
+}
+/* The same white/lime wordmark remains readable in the light page footer. */
+.relay-logo--compact {
+  font-size: 16px;
+  background: #0b2947;
+  padding: 6px 8px;
+}
+.footer-branding {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (min-width:1500px) {
+  .relay-logo--sidebar { font-size:36px; }
+}
+@media (max-width:1200px) {
+  .relay-logo--sidebar { font-size:30px; }
+}
+@media (max-width:650px) {
+  .relay-logo--sidebar { font-size:32px; }
+}
