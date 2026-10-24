@@ -10,6 +10,7 @@ import {
   Headphones,
   House,
   MapPin,
+  Map as MapIcon,
   Menu,
   Phone,
   Search,
@@ -21,6 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { simulationApi } from "./api";
+import IncidentMap from "./components/IncidentMap";
+import GisMapPage from "./components/GisMapPage";
+import IncidentTags from "./components/IncidentTags";
+import { disciplineLabel, displayTimestamp } from "./gis";
+import louisianaMark from "./assets/louisiana.svg";
 import {
   acknowledgeAssignment,
   approveAssignment,
@@ -29,9 +35,16 @@ import {
 } from "./state";
 import type { Correction, Incident, Snapshot } from "./types";
 type Route =
-  "home" | "incidents" | "calls" | "responders" | "activity" | "responder";
+  | "home"
+  | "map"
+  | "incidents"
+  | "calls"
+  | "responders"
+  | "activity"
+  | "responder";
 const navigation: { id: Route; label: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
+  { id: "map", label: "Map", icon: MapIcon },
   { id: "incidents", label: "Incidents", icon: TriangleAlert },
   { id: "calls", label: "Calls", icon: Phone },
   { id: "responders", label: "Responders", icon: Users },
@@ -39,6 +52,7 @@ const navigation: { id: Route; label: string; icon: typeof House }[] = [
 ];
 const titles: Record<Route, string> = {
   home: "Dispatch overview",
+  map: "Incident map",
   incidents: "Incident details",
   calls: "Call records",
   responders: "Responder coordination",
@@ -49,6 +63,7 @@ function readRoute(): Route {
   const part = window.location.hash.slice(2).split("/")[0];
   return [
     "home",
+    "map",
     "incidents",
     "calls",
     "responders",
@@ -107,27 +122,6 @@ function IncidentIcon({ incident }: { incident: Incident }) {
     </span>
   );
 }
-function MapIllustration({ location }: { location: string }) {
-  return (
-    <div
-      className="map"
-      role="img"
-      aria-label={`Illustrative map for ${location}. No verified geographic position.`}
-    >
-      <div className="map-river" />
-      <div className="map-road road-one" />
-      <div className="map-road road-two" />
-      <span className="map-area area-one">LOUISIANA</span>
-      <span className="map-area area-two">Bayou region</span>
-      <span className="map-pin">
-        <MapPin size={31} fill="currentColor" />
-        <strong>{location}</strong>
-      </span>
-      <span className="map-note">Illustrative map · not for navigation</span>
-      <span className="map-north">N ↑</span>
-    </div>
-  );
-}
 export default function App() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [route, setRoute] = useState<Route>(readRoute);
@@ -172,7 +166,7 @@ export default function App() {
   const incident =
     data.incidents.find((i) => i.id === selected) ?? data.incidents[0];
   const matches = (i: Incident) =>
-    `${i.id} ${i.title} ${i.location} ${i.hazards}`
+    `${i.id} ${i.title} ${i.location} ${i.hazards} ${i.category} ${i.tags.join(" ")}`
       .toLowerCase()
       .includes(query.toLowerCase());
   const visible = data.incidents.filter(
@@ -184,13 +178,20 @@ export default function App() {
           : i.status === "Assigned")),
   );
   const pending = data.assignments.filter((a) => !a.acknowledged);
-  const currentAssignment = data.assignments.find(
+  const currentAssignments = data.assignments.filter(
     (a) => a.incidentId === incident.id,
   );
   const unitAssignment = data.assignments.find((a) => a.unitId === unit);
   const assignedIncident = data.incidents.find(
     (i) => i.id === unitAssignment?.incidentId,
   );
+  const queueRows =
+    route === "home"
+      ? (visible.some((i) => i.id === incident.id)
+          ? [incident, ...visible.filter((i) => i.id !== incident.id)]
+          : visible
+        ).slice(0, 3)
+      : visible;
   function queue() {
     return (
       <>
@@ -201,7 +202,7 @@ export default function App() {
         </div>
         <div className="incident-list">
           {visible.length ? (
-            visible.map((i) => (
+            queueRows.map((i) => (
               <div
                 className={`incident-row ${i.id === incident.id ? "selected" : ""}`}
                 key={i.id}
@@ -249,6 +250,19 @@ export default function App() {
             </div>
           )}
         </div>
+        {route === "home" && (
+          <div className="home-queue-more">
+            <span>
+              Showing {queueRows.length} of {visible.length} matching incidents
+            </span>
+            <button
+              className="text-button"
+              onClick={() => go("map", incident.id)}
+            >
+              View full map <ArrowRight size={13} />
+            </button>
+          </div>
+        )}
       </>
     );
   }
@@ -280,7 +294,13 @@ export default function App() {
     <div className="app">
       <aside className={`sidebar ${menu ? "is-open" : ""}`}>
         <a className="brand" href="#/home" aria-label="Relay4 home">
-          <span className="brand-mark">↗</span>relay<span>4</span>
+          <img
+            className="brand-mark"
+            src={louisianaMark}
+            alt=""
+            aria-hidden="true"
+          />
+          relay<span>4</span>
         </a>
         <div className="workspace-label">LOUISIANA COORDINATION</div>
         <nav aria-label="Main navigation">
@@ -390,6 +410,15 @@ export default function App() {
               Dismiss
             </button>
           </div>
+        )}
+        {route === "map" && (
+          <GisMapPage
+            data={data}
+            selectedId={incident.id}
+            query={query}
+            onSelect={(id) => go("map", id)}
+            onOpen={(id) => go("incidents", id)}
+          />
         )}
         {route === "home" && (
           <>
@@ -501,8 +530,13 @@ export default function App() {
                     <span>{incident.detail}</span>
                   </div>
                 </div>
+                <IncidentTags incident={incident} />
                 {facts(incident)}
-                <MapIllustration location={incident.location} />
+                <IncidentMap
+                  incidents={data.incidents}
+                  selectedIncidentId={incident.id}
+                  onSelectIncident={setSelected}
+                />
                 <button
                   className="button wide"
                   onClick={() => go("incidents", incident.id)}
@@ -556,11 +590,19 @@ export default function App() {
                       <span>{incident.detail}</span>
                     </div>
                   </div>
-                  {facts(incident)}
-                  <MapIllustration location={incident.location} />
+                  <IncidentTags incident={incident} />
                   <p className="muted small">
-                    Coordinates: Unknown · Reported information requires human
-                    review.
+                    {incident.source} · Updated{" "}
+                    {displayTimestamp(incident.updatedAt)}
+                  </p>
+                  {facts(incident)}
+                  <IncidentMap
+                    incidents={data.incidents}
+                    selectedIncidentId={incident.id}
+                    onSelectIncident={(id) => go("incidents", id)}
+                  />
+                  <p className="muted small">
+                    Reported information requires human review.
                   </p>
                 </Panel>
                 <Panel
@@ -660,49 +702,61 @@ export default function App() {
                   title="Assignment approval"
                   eyebrow="HUMAN DECISION REQUIRED"
                 >
-                  {currentAssignment ? (
-                    <>
+                  {incident.responseNeeds.map((need) => (
+                    <p className="gis-response-need" key={need}>
+                      <strong>{disciplineLabel(need)} response</strong>
+                      {currentAssignments.some(
+                        (a) =>
+                          data.units.find((u) => u.id === a.unitId)
+                            ?.discipline === need,
+                      )
+                        ? "Human-approved assignment below"
+                        : "Human approval pending"}
+                    </p>
+                  ))}
+                  {currentAssignments.map((assignment) => (
+                    <div className="assignment-entry" key={assignment.id}>
                       <div className="assignment-unit">
                         <Truck />
                         <strong>
                           {
-                            data.units.find(
-                              (u) => u.id === currentAssignment.unitId,
-                            )?.name
+                            data.units.find((u) => u.id === assignment.unitId)
+                              ?.name
                           }
                         </strong>
                       </div>
-                      <Badge good={currentAssignment.acknowledged}>
-                        {currentAssignment.acknowledged
+                      <Badge good={assignment.acknowledged}>
+                        {assignment.acknowledged
                           ? "Acknowledged"
                           : "Awaiting acknowledgement"}
                       </Badge>
                       <p className="muted small">
-                        Approved by {currentAssignment.approvedBy}. Travel
+                        Approved by {assignment.approvedBy} ·{" "}
+                        {displayTimestamp(assignment.approvedAt)}. Travel
                         status: Unknown.
                       </p>
                       <button
                         className="button secondary wide"
                         onClick={() => {
-                          setUnit(currentAssignment.unitId);
+                          setUnit(assignment.unitId);
                           go("responder");
                         }}
                       >
                         Open responder view
                         <ArrowRight size={16} />
                       </button>
-                    </>
-                  ) : (
-                    <AssignmentForm
-                      data={data}
-                      onApprove={(id) =>
-                        update(
-                          (s) => approveAssignment(s, incident.id, id),
-                          "Assignment approved. Waiting for responder acknowledgement.",
-                        )
-                      }
-                    />
-                  )}
+                    </div>
+                  ))}
+                  <AssignmentForm
+                    key={`${incident.id}-${data.assignments.length}`}
+                    data={data}
+                    onApprove={(id) =>
+                      update(
+                        (s) => approveAssignment(s, incident.id, id),
+                        "Assignment approved. Waiting for responder acknowledgement.",
+                      )
+                    }
+                  />
                 </Panel>
               </div>
             </div>
@@ -947,7 +1001,16 @@ export default function App() {
                     <span>{assignedIncident.detail}</span>
                   </div>
                 </div>
+                <IncidentTags incident={assignedIncident} />
+                <p className="muted small">
+                  {assignedIncident.source} · Updated{" "}
+                  {displayTimestamp(assignedIncident.updatedAt)}
+                </p>
                 {facts(assignedIncident)}
+                <IncidentMap
+                  incidents={[assignedIncident]}
+                  selectedIncidentId={assignedIncident.id}
+                />
                 <div className="hazard-notice">
                   <TriangleAlert size={20} />
                   <span>

@@ -37,7 +37,10 @@ describe("shared simulation workflows", () => {
     expect(assignment.acknowledged).toBe(false);
     expect(approved.incidents[0].status).toBe("Assigned");
     expect(() => approveAssignment(approved, "R4-002", "U07")).toThrow();
-    expect(() => approveAssignment(approved, "R4-001", "U12")).toThrow();
+    const reinforced = approveAssignment(approved, "R4-001", "U12");
+    expect(
+      reinforced.assignments.filter((a) => a.incidentId === "R4-001"),
+    ).toHaveLength(2);
     const received = acknowledgeAssignment(approved, assignment.id);
     expect(
       received.assignments.find((a) => a.id === assignment.id)?.acknowledged,

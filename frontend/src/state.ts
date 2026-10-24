@@ -27,7 +27,10 @@ export function correctIncident(
   const incident = state.incidents.find((i) => i.id === id);
   if (!incident || !correction.value.trim() || !correction.reason.trim())
     throw new Error("A value and evidence or reason are required.");
-  const detail = `Demo dispatcher changed ${correction.field} from “${incident[correction.field]}” to “${correction.value.trim()}”. Reason: ${correction.reason.trim()}`;
+  const clearsCoordinates =
+    (correction.field === "location" || correction.field === "detail") &&
+    correction.value.trim() !== incident[correction.field];
+  const detail = `Demo dispatcher changed ${correction.field} from “${incident[correction.field]}” to “${correction.value.trim()}”. Reason: ${correction.reason.trim()}${clearsCoordinates && incident.coordinates ? " Coordinates cleared pending location review." : ""}`;
   return {
     ...state,
     incidents: state.incidents.map((i) =>
@@ -35,6 +38,8 @@ export function correctIncident(
         ? {
             ...i,
             [correction.field]: correction.value.trim(),
+            updatedAt: new Date().toISOString(),
+            coordinates: clearsCoordinates ? null : i.coordinates,
             status:
               i.status === "Assigned"
                 ? "Assigned"
@@ -58,16 +63,14 @@ export function approveAssignment(
     !state.units.some((u) => u.id === unitId)
   )
     throw new Error("Select an incident and unit.");
-  if (
-    state.assignments.some(
-      (a) => a.unitId === unitId || a.incidentId === incidentId,
-    )
-  )
-    throw new Error("This unit or incident already has an assignment.");
+  if (state.assignments.some((a) => a.unitId === unitId))
+    throw new Error("This unit already has an assignment.");
   return {
     ...state,
     incidents: state.incidents.map((i) =>
-      i.id === incidentId ? { ...i, status: "Assigned" } : i,
+      i.id === incidentId
+        ? { ...i, status: "Assigned", updatedAt: new Date().toISOString() }
+        : i,
     ),
     assignments: [
       ...state.assignments,
@@ -76,6 +79,9 @@ export function approveAssignment(
         incidentId,
         unitId,
         approvedBy: "Demo dispatcher",
+        source: "Human approval in simulation",
+        approvedAt: new Date().toISOString(),
+        acknowledgedAt: null,
         acknowledged: false,
       },
     ],
@@ -93,7 +99,9 @@ export function acknowledgeAssignment(state: Snapshot, id: string): Snapshot {
   return {
     ...state,
     assignments: state.assignments.map((a) =>
-      a.id === id ? { ...a, acknowledged: true } : a,
+      a.id === id
+        ? { ...a, acknowledged: true, acknowledgedAt: new Date().toISOString() }
+        : a,
     ),
     activity: event(
       state,

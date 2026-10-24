@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { mockMapTiles } from "./fixtures/tiles";
+test.beforeEach(async ({ page }) => {
+  await mockMapTiles(page);
+});
 
 test("dispatcher corrections, approval, responder receipt and history stay consistent", async ({
   page,
@@ -8,7 +12,9 @@ test("dispatcher corrections, approval, responder receipt and history stay consi
     page.getByRole("heading", { name: "Dispatch overview" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Open incident details" }).click();
-  await page.getByRole("combobox", { name: "Field", exact: true }).selectOption("hazards");
+  await page
+    .getByRole("combobox", { name: "Field", exact: true })
+    .selectOption("hazards");
   await page.getByLabel("Corrected value").fill("Unknown");
   await page
     .getByLabel("Evidence or reason")
@@ -18,11 +24,15 @@ test("dispatcher corrections, approval, responder receipt and history stay consi
   await expect(
     page.getByRole("button", { name: "Approve assignment" }),
   ).toBeDisabled();
-  await page.getByRole("combobox", { name: "Responder unit", exact: true }).selectOption("U07");
+  await page
+    .getByRole("combobox", { name: "Responder unit", exact: true })
+    .selectOption("U07");
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Approve assignment" }).click();
   await page.getByRole("button", { name: "Open responder view" }).click();
-  await expect(page.getByRole("combobox", { name: "Viewing unit", exact: true })).toHaveValue("U07");
+  await expect(
+    page.getByRole("combobox", { name: "Viewing unit", exact: true }),
+  ).toHaveValue("U07");
   await expect(page.locator(".hazard-notice")).toContainText("Unknown");
   await page.getByRole("button", { name: "Acknowledge assignment" }).click();
   await expect(
@@ -55,13 +65,13 @@ test("queue search, review filters, selection, call review, transcripts and link
   const search = page.getByRole("textbox", {
     name: "Search incidents, locations, and hazards",
   });
-  await search.fill("Bayou");
+  await search.fill("Bayou Oak Lane");
   await expect(page.locator(".incident-row")).toHaveCount(1);
   await page.locator(".incident-select").click();
   await expect(page.locator(".summary")).toContainText("Road blocked");
   await page.getByRole("button", { name: "Clear search" }).click();
   await page.getByRole("button", { name: "Needs review", exact: true }).click();
-  await expect(page.locator(".incident-row")).toHaveCount(2);
+  await expect(page.locator(".incident-row")).toHaveCount(3);
   await page.getByRole("button", { name: "Open incident details" }).click();
   await page
     .locator(".related-row")
@@ -70,8 +80,12 @@ test("queue search, review filters, selection, call review, transcripts and link
     .click();
   await expect(page.getByRole("status")).toContainText("Call linked");
   await page.getByRole("link", { name: "Calls", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Call records" })).toBeVisible();
-  await page.getByRole("combobox", { name: "Incident", exact: true }).selectOption("R4-002");
+  await expect(
+    page.getByRole("heading", { name: "Call records" }),
+  ).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Incident", exact: true })
+    .selectOption("R4-002");
   await expect(page.locator(".call-card")).toHaveCount(2);
   await page
     .locator(".call-card")
@@ -82,7 +96,7 @@ test("queue search, review filters, selection, call review, transcripts and link
     page.getByRole("heading", { name: "Road blocked", exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: "Home", exact: true }).click();
-  await expect(page.locator(".incident-row")).toHaveCount(2);
+  await expect(page.locator(".incident-row")).toHaveCount(3);
   await search.fill("no matching location");
   await expect(
     page.getByText("No incidents match these filters."),
@@ -106,7 +120,11 @@ test("mobile navigation and responder layout remain usable", async ({
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.screenshot({ path: "/tmp/relay4-mobile.png", fullPage: true, animations: "disabled" });
+  await page.screenshot({
+    path: "/tmp/relay4-mobile.png",
+    fullPage: true,
+    animations: "disabled",
+  });
 });
 
 test("desktop overview renders without overflow or browser errors", async ({
