@@ -1,5 +1,5 @@
 Project: Relay4
-Team: Geeks From SLU — 404
+Team:  404
 Built for Louisiana. Designed to connect communities.
 
 What we’re building: An AI emergency intake and coordination assistant that turns calls into live incident information shared by dispatchers and responders.
