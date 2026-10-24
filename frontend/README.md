@@ -1,48 +1,44 @@
-# React + Vite
+# Relay4 frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Dispatcher console: ongoing ElevenLabs calls and call summaries on the left, a full Louisiana map on the right with a pin at each reported incident location. Synthetic/demo only; it is read-only and never dispatches anyone.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## GIS demo and integration limits
-
-R4-004 is a synthetic collision with reported fuel leakage and smoke. It is tagged Accident + Fire hazard and appears in both filters. Open it from Map, approve Engine 07 for fire and EMS 09 for medical response separately, then acknowledge each unit through Responder View. Approval and receipt stay independent and update Map, Home, Details, Responders, and Activity. A unit cannot be assigned twice, but an incident can have multiple units. No unassigned unit is presented as an available resource.
-
-Layers include reported blockages, assigned response units, fire hazards, fire units, assigned EMS, fictional hospital locations, synthetic weather alerts/flood-risk polygons, and reported demo closures. Unit/hazard overlays derive from shared records. Other context arrives through the API adapter. Layer toggles are independent of incident filters. Every added overlay has source/timestamp metadata and synthetic labeling. The live alert connection is explicitly unavailable; no official feed is fabricated. Unknown-position records stay readable in Layers without map geometry. Empty/unavailable layers do not disable the base map.
-
-Only OpenStreetMap tiles are externally connected. Backend incident data, authenticated multi-unit approvals, authoritative unit positions, hospital data, weather alerts, flood models, closure sources, durable audit and synchronization still require the teammate's backend integration. There is no live GPS, resource-availability inference, severity scoring, or route/safety guidance. See the proposed API handoff for the new fields and cardinality.
-
-## Structure
-
-The scaffold's separation of reusable UI, screens, service clients, types, and assets is retained. Current implementation files are shown below; the `screens/`, `services/`, `types/`, and `tests/` directories contain incoming placeholders for future organization, not a second data model or active API client.
-
-```text
-frontend/
-├── src/
-│   ├── App.tsx          # Navigation, dispatcher/responder screens, shared state
-│   ├── components/      # Reusable UI, GIS workspace, map and overlays
-│   ├── screens/         # Reserved screen modules, including future caller UI
-│   ├── services/        # Reserved backend API and realtime clients
-│   ├── types/           # Reserved type modules; current contract is types.ts
-│   ├── types.ts         # Shared frontend domain types
-│   ├── api.ts           # Current simulation adapter; future service boundary
-│   ├── mockData.ts      # Synthetic scenario data
-│   └── assets/          # Local SVG assets and source/license documentation
-├── public/              # Static files served as-is
-├── e2e/                 # Active browser workflow and map tests
-├── tests/               # Incoming test scaffold; current unit tests are in src/
-├── .env.example         # Prospective service settings, no secrets
-├── API-CONTRACT.md      # Backend teammate handoff
-└── README.md
+```bash
+cp .env.example .env        # VITE_API_BASE_URL=http://localhost:8000
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-`src/types.ts`: shared domain types. `src/mockData.ts`: synthetic scenarios. `src/api.ts`: replaceable data adapter. `src/state.ts`: simulation commands. `src/coordinates.ts`: coordinate validation. `src/components/IncidentMap.tsx`: shared map. `src/components/GisMapPage.tsx`: full GIS workspace. `src/components/ContextOverlays.tsx`: context geometry. `src/gis.ts`: taxonomy, assignment summaries, and derived layers. `src/mapConfig.ts`: tile provider and regional defaults. `src/App.tsx`: reusable panels, forms, navigation, and screens. `src/styles.css`: responsive styles. See [API-CONTRACT.md](API-CONTRACT.md) for the proposed backend handoff.
+The backend must be running with `CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`. Seed a call with `backend/scripts/simulate_voice_tool.py`.
 
-The browser may request optional Google Fonts; system sans-serif is the fallback. No secrets are required.
+`npm run build` type-checks and builds; `npm run lint` lints.
+
+## How it works
+
+- Polls `GET /api/incidents` every 4 s. Opening a call fetches `GET /api/incidents/{id}` for the caller statements.
+- **Ongoing call** = status `intake` and updated within the last 10 minutes (`src/format.ts`). The backend has no call-ended event yet.
+- **Summary** = the incident `description` the ElevenLabs agent sent. Missing facts are shown as `Unknown`; caller quotes are labelled `Unverified` until verified.
+- **Louisiana focus**: the map can't pan or zoom out beyond the state, everything outside it is dimmed, and the 64 parishes are drawn (hover for name and call count). Each pinned call is labelled with its parish. Boundaries are simplified US Census data in `src/data/louisiana.json`, hidden past city zoom where they get inaccurate.
+- **Suggested priority (P1–P3)**: rule-based on the reported facts, always shown with its reasons (`src/intake.ts`). Calls are sorted by it. The dispatcher decides; nothing is dispatched.
+- **Still to ask**: the facts still unknown (location, confirmation, type, people, injuries, hazard) become prompts for the call-taker, with a facts meter on each card.
+- **Possibly related calls**: calls within 1 km and 2 h of each other (or with the same location text) are flagged and linked on the map with a dashed line. They are never merged automatically.
+- **Critical pings**: each pin sits on the geocoded point (coordinates shown on the card). P1 calls ping in red until a report is sent; live calls ping in their priority colour.
+- **Responder report (suggested, dispatcher approves)**: for the open call the console suggests the nearest free unit of the needed type (fire, EMS, police, water rescue) with a straight-line distance and ETA, and drafts the report (priority and reasons, location, parish, coordinates, facts, unverified caller quotes, open questions). The dispatcher can change the unit and must click **Approve & send**; nothing is sent automatically. Units are synthetic fixtures (`src/responders.ts`) and sending is simulated in localStorage because the backend has no responder/assignment API yet.
+- **Pins**: the backend stores locations as text, so the browser geocodes them with OpenStreetMap Nominatim, restricted to Louisiana (`src/geocode.ts`, max 1 request/s, cached in localStorage). A place that cannot be found, or that resolves outside Louisiana, is listed as "Not found on map", never guessed.
+
+## Files
+
+```
+src/api.ts                  backend requests
+src/hooks.ts                polling, detail fetch, geocoding
+src/geocode.ts              Nominatim lookup + cache
+src/format.ts               live-call rule, time and label formatting
+src/intake.ts               priority, missing facts, related calls
+src/louisiana.ts            parish lookup, state outline and mask
+src/responders.ts           synthetic units, unit suggestion, report text
+src/components/DispatchPanel.tsx
+src/components/CallSidebar.tsx
+src/components/IncidentMap.tsx
+src/styles.css              palette adapted from DispatcherAI's console
+```

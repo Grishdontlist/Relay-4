@@ -25,7 +25,17 @@ class Settings(BaseSettings):
 
     @property
     def configured_cors_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        configured = self.cors_origins
+        if not configured and self.app_env == "development":
+            configured = ",".join(
+                (
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "http://localhost:5174",
+                    "http://127.0.0.1:5174",
+                )
+            )
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
 
 
 @lru_cache
