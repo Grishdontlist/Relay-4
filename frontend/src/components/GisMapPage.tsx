@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Layers, MapPin } from "lucide-react";
-import type { Snapshot } from "../types";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { ArrowRight, MapPin } from "lucide-react";
+import type { Snapshot, ContextLayer } from "../types";
 import {
   assignmentStatus,
   buildMapLayers,
@@ -8,12 +15,26 @@ import {
   categoryLabel,
   disciplineLabel,
   displayTimestamp,
-  featureHasGeometry,
   matchesCategory,
 } from "../gis";
 import { normalizeCoordinates } from "../coordinates";
 import { incidentSymbols } from "../mapIcons";
 import IncidentMap from "./IncidentMap";
+import ResponseContextPanel from "./ResponseContextPanel";
+import MapLayerControls from "./MapLayerControls";
+import MapLegend from "./MapLegend";
+import { MAP_STYLES } from "../mapConfig";
+import { simulationApi } from "../api";
+import {
+  isLayerReady,
+  presetExtent,
+  responsePresets,
+  type ResponsePreset,
+  type MapStyle,
+  type MapPreferences,
+  type MapCamera,
+  type ViewportRequest,
+} from "../responsePresets";
 import IncidentTags from "./IncidentTags";
 import "./GisMapPage.css";
 export default function GisMapPage({
@@ -22,15 +43,30 @@ export default function GisMapPage({
   onSelect,
   onOpen,
   query,
+  preferences,
+  onPreferencesChange,
+  initialCamera,
+  onCameraChange,
+  onLayerUpdate,
 }: {
   data: Snapshot;
   selectedId: string;
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   query: string;
+  preferences: MapPreferences;
+  onPreferencesChange: Dispatch<SetStateAction<MapPreferences>>;
+  initialCamera?: MapCamera;
+  onCameraChange: (camera: MapCamera) => void;
+  onLayerUpdate: (layer: ContextLayer) => void;
 }) {
-  const [filter, setFilter] = useState("all");
-  const [enabled, setEnabled] = useState<string[]>([]);
+  const filter = preferences.filter;
+  const preset = preferences.preset;
+  const enabled = preferences.layersByPreset[preset];
+  const [viewportRequest, setViewportRequest] = useState<ViewportRequest>();
+  const sequence = useRef(0);
+  const setFilter = (filter: string) =>
+    onPreferencesChange((previous) => ({ ...previous, filter }));
   const layers = useMemo(() => buildMapLayers(data), [data]);
   const visible = data.incidents.filter(
     (i) =>
@@ -45,6 +81,57 @@ export default function GisMapPage({
     if (selected && selected.id !== selectedId) onSelect(selected.id);
   }, [selected?.id, selectedId, visibleKey, onSelect]);
   const mapped = visible.filter((i) => normalizeCoordinates(i.coordinates));
+  const activeLayers = layers.filter(
+    (layer) => enabled.includes(layer.id) && isLayerReady(layer),
+  );
+  function focusPreset(next: ResponsePreset) {
+    setViewportRequest({
+      token: ++sequence.current,
+      mode: "fit",
+      points: presetExtent(
+        next,
+        data,
+        layers,
+        preferences.layersByPreset[next],
+      ),
+      maxZoom: responsePresets[next].maxZoom,
+    });
+  }
+  function selectIncident(id: string) {
+    onSelect(id);
+    const point = normalizeCoordinates(
+      data.incidents.find((i) => i.id === id)?.coordinates,
+    );
+    if (point)
+      setViewportRequest({
+        token: ++sequence.current,
+        mode: "pan",
+        points: [[point.latitude, point.longitude]],
+        maxZoom: 19,
+      });
+  }
+  async function retryLayer(layer: ContextLayer) {
+    onLayerUpdate({
+      ...layer,
+      state: "loading",
+      features: [],
+      message: "Refreshing context source…",
+    });
+    try {
+      onLayerUpdate(await simulationApi.reloadContextLayer(layer.id));
+    } catch (error) {
+      onLayerUpdate({
+        ...layer,
+        state: "error",
+        features: [],
+        message:
+          error instanceof Error
+            ? error.message
+            : "Context source unavailable.",
+      });
+    }
+  }
+
   return (
     <div className="gis-page">
       <div className="gis-intro">
@@ -54,6 +141,56 @@ export default function GisMapPage({
         </p>
         <span>No live tracking · no route guidance</span>
       </div>
+      <div className="map-preset-controls">
+        <label>
+          Map style
+          <select
+            aria-label="Map style"
+            value={preferences.style}
+            onChange={(e) => {
+              const style = e.target.value as MapStyle;
+              if (MAP_STYLES[style].available)
+                onPreferencesChange((previous) => ({ ...previous, style }));
+            }}
+          >
+            {Object.entries(MAP_STYLES).map(([id, style]) => (
+              <option key={id} value={id} disabled={!style.available}>
+                {style.label}
+                {!style.available ? " — unavailable" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Response preset
+          <select
+            aria-label="Response preset"
+            value={preset}
+            onChange={(e) => {
+              const next = e.target.value as ResponsePreset;
+              onPreferencesChange((previous) => ({
+                ...previous,
+                preset: next,
+              }));
+              focusPreset(next);
+            }}
+          >
+            {Object.entries(responsePresets).map(([id, preset]) => (
+              <option key={id} value={id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="map-style-availability">
+          Streets uses OpenStreetMap. Satellite and Terrain are unavailable: no
+          licensed provider or credentials configured.
+        </p>
+      </div>
+      <p className="map-independence-note">
+        Incident category filter is independent of the response preset. Presets
+        never hide mixed-category reports.
+      </p>
       <div
         className="gis-filters"
         role="group"
@@ -102,145 +239,54 @@ export default function GisMapPage({
             incidents={data.incidents}
             selectedIncidentId={selected?.id ?? selectedId}
             visibleIncidentIds={visible.map((i) => i.id)}
-            onSelectIncident={onSelect}
-            contextLayers={layers.filter(
-              (layer) =>
-                enabled.includes(layer.id) && layer.state !== "unavailable",
-            )}
-            overview
+            onSelectIncident={selectIncident}
+            contextLayers={activeLayers}
+            mapStyle={preferences.style}
+            manualViewport
+            viewportRequest={viewportRequest}
+            initialCamera={initialCamera}
+            onViewportChange={onCameraChange}
+            onRecenter={() => focusPreset(preset)}
           />
-          <details className="gis-layers">
-            <summary>
-              <Layers size={17} aria-hidden="true" />
-              Layers{" "}
-              <span>
-                {
-                  enabled.filter((id) =>
-                    layers.some(
-                      (l) => l.id === id && l.state !== "unavailable",
-                    ),
-                  ).length
-                }{" "}
-                on
-              </span>
-            </summary>
-            <div className="gis-layer-content">
-              <p>
-                Context is independent of incident filters. Dashed overlays are
-                synthetic; unit points are static sample positions, not
-                availability or tracking.
-              </p>
-              <div className="gis-layer-options">
-                {layers.map((layer) => {
-                  const located =
-                    layer.features.filter(featureHasGeometry).length;
-                  return (
-                    <div className="gis-layer" key={layer.id}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          aria-label={layer.name}
-                          disabled={layer.state === "unavailable"}
-                          checked={
-                            enabled.includes(layer.id) &&
-                            layer.state !== "unavailable"
-                          }
-                          onChange={(e) =>
-                            setEnabled((ids) =>
-                              e.target.checked
-                                ? [...ids, layer.id]
-                                : ids.filter((id) => id !== layer.id),
-                            )
-                          }
-                        />
-                        <span>
-                          <strong>{layer.name}</strong>
-                          <small>
-                            {layer.state === "synthetic"
-                              ? "Synthetic"
-                              : layer.state === "unavailable"
-                                ? "Unavailable"
-                                : "Connected"}{" "}
-                            · {located} mapped / {layer.features.length} records
-                          </small>
-                        </span>
-                      </label>
-                      <p>
-                        {layer.source} · Updated{" "}
-                        {displayTimestamp(layer.updatedAt)}
-                      </p>
-                      {layer.message && <p>{layer.message}</p>}
-                      {enabled.includes(layer.id) && (
-                        <ul className="gis-layer-records">
-                          {layer.features.length ? (
-                            layer.features.map((feature) => (
-                              <li key={feature.id}>
-                                <strong>{feature.name}</strong>
-                                <span>{feature.description}</span>
-                                <small>
-                                  {featureHasGeometry(feature)
-                                    ? "Position supplied · " +
-                                      (feature.geometry.type === "point"
-                                        ? feature.geometry.position?.source
-                                        : feature.geometry.positions[0]?.source)
-                                    : "Exact location unknown · not mapped"}{" "}
-                                  · {displayTimestamp(feature.updatedAt)}
-                                </small>
-                              </li>
-                            ))
-                          ) : (
-                            <li>
-                              No records supplied. The base map remains
-                              available.
-                            </li>
-                          )}
-                        </ul>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </details>
-          <details className="gis-legend" open>
-            <summary>Legend</summary>
-            <div>
-              {categories
-                .filter((c) => c.id !== "all")
-                .map((c) => (
-                  <span key={c.id}>
-                    <i
-                      className={`legend-symbol category-${c.id}`}
-                      aria-hidden="true"
-                    >
-                      {c.symbol}
-                    </i>
-                    {c.label}
-                  </span>
-                ))}
-              <span>
-                <i className="legend-symbol" aria-hidden="true">
-                  •
-                </i>
-                Other report
-              </span>
-              <span>
-                <i className="legend-context" aria-hidden="true" />
-                Synthetic context
-              </span>
-            </div>
-            <p>
-              Marker icon shows primary category. Secondary tags appear in the
-              list and incident panel. Unknown positions have no incident
-              marker. Dashed circles: context points; dashed outlines: zones;
-              dashed lines: closures.
-            </p>
-          </details>
+          <MapLayerControls
+            layers={layers}
+            enabled={enabled}
+            onToggle={(id, checked) =>
+              onPreferencesChange((previous) => ({
+                ...previous,
+                layersByPreset: {
+                  ...previous.layersByPreset,
+                  [preset]: checked
+                    ? [...new Set([...previous.layersByPreset[preset], id])]
+                    : previous.layersByPreset[preset].filter(
+                        (current) => current !== id,
+                      ),
+                },
+              }))
+            }
+            onReset={() =>
+              onPreferencesChange((previous) => ({
+                ...previous,
+                layersByPreset: {
+                  ...previous.layersByPreset,
+                  [preset]: [...responsePresets[preset].layers],
+                },
+              }))
+            }
+            onRetry={retryLayer}
+          />
+          <MapLegend incidents={visible} layers={activeLayers} />
         </div>
         <aside
           className="gis-side"
           aria-label="Map incidents and selected incident"
         >
+          <ResponseContextPanel
+            preset={preset}
+            data={data}
+            layers={layers}
+            enabled={enabled}
+          />
           {selected ? (
             <section
               className="gis-selected"
@@ -327,7 +373,7 @@ export default function GisMapPage({
                 type="button"
                 className={`gis-list-item ${selected?.id === incident.id ? "selected" : ""}`}
                 aria-pressed={selected?.id === incident.id}
-                onClick={() => onSelect(incident.id)}
+                onClick={() => selectIncident(incident.id)}
               >
                 <span
                   className={`legend-symbol category-${incident.category}`}

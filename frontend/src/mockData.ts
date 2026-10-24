@@ -1,4 +1,5 @@
 import type { Snapshot, Coordinates } from "./types";
+import { responseFixtures } from "./responseFixtures";
 const demoTime = "2026-10-24T15:50:00Z";
 const reportSource = "Synthetic caller intake · training only";
 const simulated = (latitude: number, longitude: number): Coordinates => ({
@@ -265,6 +266,7 @@ export const sampleData: Snapshot = {
     },
   ],
   contextLayers: [
+    ...responseFixtures,
     {
       id: "hospitals",
       name: "Hospital locations",

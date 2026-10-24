@@ -90,20 +90,17 @@ export function buildMapLayers(data: Snapshot): ContextLayer[] {
     name,
     state: "synthetic",
     source: "Synthetic caller reports",
-    updatedAt: data.incidents.reduce(
-      (latest, i) => (i.updatedAt > latest ? i.updatedAt : latest),
-      "",
-    ),
-    features: data.incidents
+    updatedAt: data.incidents
       .filter(predicate)
-      .map((i) => ({
-        id: i.id,
-        name: `${i.id} · ${i.title}`,
-        description: `${i.location}. Reported hazards: ${i.hazards}`,
-        source: i.source,
-        updatedAt: i.updatedAt,
-        geometry: { type: "point", position: i.coordinates },
-      })),
+      .reduce((latest, i) => (i.updatedAt > latest ? i.updatedAt : latest), ""),
+    features: data.incidents.filter(predicate).map((i) => ({
+      id: i.id,
+      name: `${i.id} · ${i.title}`,
+      description: `${i.location}. Reported hazards: ${i.hazards}`,
+      source: i.source,
+      updatedAt: i.updatedAt,
+      geometry: { type: "point", position: i.coordinates },
+    })),
   });
   const unitLayer = (
     id: string,
@@ -114,7 +111,13 @@ export function buildMapLayers(data: Snapshot): ContextLayer[] {
     name,
     state: "synthetic",
     source: "Synthetic unit roster",
-    updatedAt: null,
+    updatedAt:
+      data.units
+        .filter(predicate)
+        .reduce(
+          (latest, unit) => (unit.updatedAt > latest ? unit.updatedAt : latest),
+          "",
+        ) || null,
     features: data.units.filter(predicate).map((u) => {
       const assignment = data.assignments.find((a) => a.unitId === u.id);
       return {
@@ -147,6 +150,7 @@ export function buildMapLayers(data: Snapshot): ContextLayer[] {
         u.discipline === "ems" &&
         data.assignments.some((a) => a.unitId === u.id),
     ),
+    unitLayer("ems-units", "EMS units", (u) => u.discipline === "ems"),
     ...(data.contextLayers ?? []),
   ];
 }
