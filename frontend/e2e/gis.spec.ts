@@ -90,6 +90,7 @@ test("context toggles retain provenance and tolerate empty or unavailable layers
   await expect(page.locator(".gis-layer-records")).toContainText(
     "Capabilities, capacity, resource availability and receiving status: Unknown",
   );
+  await page.getByRole("button", { name: "Zoom out", exact: true }).click();
   await page.locator(".context-hospitals").click();
   await expect(page.locator(".leaflet-popup")).toContainText(
     "SYNTHETIC CONTEXT",
@@ -106,24 +107,20 @@ test("context toggles retain provenance and tolerate empty or unavailable layers
     .getByRole("checkbox", { name: "Reported road blockages", exact: true })
     .check();
   await expect(
-    page
-      .locator(".gis-layer")
-      .filter({
-        has: page.getByRole("checkbox", {
-          name: "Reported road blockages",
-          exact: true,
-        }),
+    page.locator(".gis-layer").filter({
+      has: page.getByRole("checkbox", {
+        name: "Reported road blockages",
+        exact: true,
       }),
+    }),
   ).toContainText("Exact location unknown · not mapped");
   await page
     .getByRole("checkbox", { name: "Assigned EMS", exact: true })
     .check();
   await expect(
-    page
-      .locator(".gis-layer")
-      .filter({
-        has: page.getByRole("checkbox", { name: "Assigned EMS", exact: true }),
-      }),
+    page.locator(".gis-layer").filter({
+      has: page.getByRole("checkbox", { name: "Assigned EMS", exact: true }),
+    }),
   ).toContainText("No records supplied");
   await expect(
     page.getByRole("checkbox", { name: "Live alert connection", exact: true }),

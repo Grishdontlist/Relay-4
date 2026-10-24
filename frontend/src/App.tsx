@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -24,6 +24,7 @@ import {
 import { simulationApi } from "./api";
 import IncidentMap from "./components/IncidentMap";
 import GisMapPage from "./components/GisMapPage";
+import { initialMapPreferences, type MapCamera } from "./responsePresets";
 import IncidentTags from "./components/IncidentTags";
 import { disciplineLabel, displayTimestamp } from "./gis";
 import louisianaMark from "./assets/louisiana.svg";
@@ -126,6 +127,8 @@ export default function App() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [route, setRoute] = useState<Route>(readRoute);
   const [selected, setSelected] = useState("R4-001");
+  const [mapPreferences, setMapPreferences] = useState(initialMapPreferences);
+  const mapCamera = useRef<MapCamera | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [callFilter, setCallFilter] = useState("all");
@@ -413,6 +416,24 @@ export default function App() {
         )}
         {route === "map" && (
           <GisMapPage
+            preferences={mapPreferences}
+            onPreferencesChange={setMapPreferences}
+            initialCamera={mapCamera.current}
+            onCameraChange={(camera) => {
+              mapCamera.current = camera;
+            }}
+            onLayerUpdate={(layer) =>
+              setData((previous) =>
+                previous
+                  ? {
+                      ...previous,
+                      contextLayers: previous.contextLayers.map((current) =>
+                        current.id === layer.id ? layer : current,
+                      ),
+                    }
+                  : previous,
+              )
+            }
             data={data}
             selectedId={incident.id}
             query={query}
