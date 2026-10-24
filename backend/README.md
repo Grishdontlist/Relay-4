@@ -1,0 +1,116 @@
+# Relay4 MVP 1 Backend
+
+FastAPI backend for Relay4's synthetic emergency voice intake workflow. MVP 1 receives structured facts from an ElevenLabs Conversational AI webhook tool, persists incidents in SQLite, and records corrections without making dispatch decisions.
+
+## Responsibilities
+
+- Receive and normalize emergency intake data.
+- Store live incident records and their correction history.
+- Receive and validate structured incident facts from ElevenLabs.
+- Persist incidents, source evidence, conversation bindings, and correction history.
+- Make repeated webhook events idempotent using a unique event ID.
+- Protect manual incident writes with an admin API key.
+- Keep all dispatch approval outside the voice agent and outside this MVP.
+- Provide a stable API boundary for future DeepSpace integration.
+
+## Suggested structure
+
+```text
+backend/
+├── app/
+│   ├── api/          # Incident and ElevenLabs webhook routes
+│   ├── models/       # SQLAlchemy persistence models
+│   ├── services/     # Incident upsert and audit logic
+│   ├── config.py     # Environment-backed settings
+│   ├── database.py   # SQLite/SQLAlchemy setup
+│   ├── schemas.py    # Pydantic request and response models
+│   ├── security.py   # Admin and webhook authentication
+│   └── main.py       # FastAPI application entry point
+├── scripts/          # Synthetic webhook request script
+├── tests/
+├── .env.example
+├── requirements.txt
+└── README.md
+```
+
+## Setup
+
+Python 3.11+ is required.
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Set different random values for `ELEVENLABS_WEBHOOK_SECRET` and `ADMIN_API_KEY` in `.env`. Never commit `.env` or real credentials.
+
+Start the service from the `backend/` directory:
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Interactive API documentation is available at <http://127.0.0.1:8000/docs>.
+
+## API behavior
+
+- `GET /health` is a basic service check.
+- `POST /api/elevenlabs/tools/upsert-incident` is protected by the configured webhook secret. It requires a unique `event_id` and `conversation_id`.
+- The first authenticated event for a conversation creates a server-side conversation binding and an incident. Later events for that conversation update the same incident.
+- Repeating an `event_id` returns the existing incident with `duplicate: true` and makes no additional changes.
+- LLM-provided source quotes are stored in `incident_evidence` as `unverified`. This MVP does not mark evidence verified automatically.
+- `POST /api/incidents` and `PATCH /api/incidents/{id}` require `X-Admin-API-Key`. These are manual development/admin operations.
+- Incident statuses are limited to `intake`, `needs_review`, and `reviewed`.
+- No endpoint allows ElevenLabs to approve assignments or dispatch responders.
+
+## Configure the ElevenLabs agent
+
+Create a server-side webhook tool in the ElevenLabs agent configuration with:
+
+- URL: `https://YOUR-BACKEND-HOST/api/elevenlabs/tools/upsert-incident`
+- HTTP method: `POST`
+- Header: `X-ElevenLabs-Webhook-Secret: <same value as ELEVENLABS_WEBHOOK_SECRET>`
+- JSON body fields:
+  - Required: `event_id`, `conversation_id`
+  - Optional incident facts: `incident_type`, `description`, `location`, `landmark`, `hazard`, `people_count`, `injuries`, `location_confirmed`
+  - Optional evidence: `source_quote`, `transcript_reference`
+
+Use an event ID that is unique for each tool invocation. The exact ElevenLabs UI field names and webhook configuration can change, so verify the current agent tool schema before connecting a deployed agent. The backend intentionally does not require an ElevenLabs API key for inbound webhook authentication.
+
+Example request:
+
+```json
+{
+  "event_id": "demo-event-001",
+  "conversation_id": "demo-conversation-001",
+  "incident_type": "stranded_vehicle",
+  "location": "Cypress Bend Market",
+  "landmark": "West service entrance",
+  "hazard": "rising_water",
+  "people_count": 2,
+  "location_confirmed": true,
+  "source_quote": "We're stuck near the market and water is rising.",
+  "transcript_reference": "demo-transcript-message-001"
+}
+```
+
+## Synthetic webhook test
+
+Start Uvicorn, then run this from the `backend/` directory:
+
+```bash
+ELEVENLABS_WEBHOOK_SECRET="your-value-from-.env" python scripts/simulate_voice_tool.py
+```
+
+The script uses synthetic data and does not require an ElevenLabs account.
+
+## Automated tests
+
+```bash
+pytest -q
+```
+
+The tests use a temporary SQLite database and cover authentication, validation, null handling, conversation binding, idempotent retries, corrections, evidence status, protected writes, and the absence of dispatch approval in the voice tool API.
