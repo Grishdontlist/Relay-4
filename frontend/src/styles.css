@@ -99,27 +99,6 @@ small {
   flex-direction: column;
   z-index: 30;
 }
-.brand {
-  display: flex;
-  align-items: center;
-  color: white;
-  font-family: "Manrope", sans-serif;
-  font-size: 39px;
-  font-weight: 800;
-  letter-spacing: -2px;
-  padding: 0 11px;
-}
-.brand > span:last-child {
-  color: #c1f249;
-}
-.brand-mark {
-  display: block;
-  flex: 0 0 32px;
-  width: 32px;
-  height: 37px;
-  margin-right: 10px;
-  object-fit: contain;
-}
 .workspace-label {
   font-size: 9px;
   letter-spacing: 1.6px;
