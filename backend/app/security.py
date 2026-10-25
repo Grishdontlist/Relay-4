@@ -19,4 +19,17 @@ async def require_webhook_secret(request: Request) -> None:
     if not configured_secret:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Webhook authentication is not configured")
     if not supplied_secret or not hmac.compare_digest(supplied_secret, configured_secret):
+        # TEMP DEBUG (remove): explain rejections without logging secret values.
+        import logging
+
+        logging.getLogger("uvicorn.error").warning(
+            "webhook 401 debug: expected header %r present=%s supplied_len=%d expected_len=%d "
+            "stripped_match=%s header_names=%s",
+            header_name,
+            header_name.lower() in {k.lower() for k in request.headers.keys()},
+            len(supplied_secret),
+            len(configured_secret),
+            hmac.compare_digest(supplied_secret.strip().removeprefix("Bearer ").strip(), configured_secret),
+            sorted(request.headers.keys()),
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook credentials")
