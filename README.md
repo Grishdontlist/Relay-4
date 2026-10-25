@@ -1,8 +1,7 @@
 # Relay4
 
-**Built for Louisiana. Designed to connect communities.**
-
-Team 404
+** An emergency dispatch assistant. Clearer information for dispatcher decisions.**
+**Team 404**
 
 Relay4 turns emergency intake conversations into incident records that a dispatcher can review on a Louisiana map. The voice agent sends structured facts to a Python API, the API preserves changes and caller statements, and the dashboard brings the information together as the call develops.
 
